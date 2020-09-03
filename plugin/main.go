@@ -24,13 +24,13 @@ type analyzerPlugin struct{}
 
 func (analyzerPlugin) GetAnalyzers() []*analysis.Analyzer {
 	if flags != "" {
-		flagset := go_unused_reassignment.Analyzer.Flags
+		flagset := gounusedreassignment.Analyzer.Flags
 		if err := flagset.Parse(strings.Split(flags, " ")); err != nil {
 			panic("cannot parse flags of go_unused_reassignment: " + err.Error())
 		}
 	}
 	return []*analysis.Analyzer{
-		go_unused_reassignment.Analyzer,
+		gounusedreassignment.Analyzer,
 	}
 }
 

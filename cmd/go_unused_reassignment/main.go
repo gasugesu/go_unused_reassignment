@@ -5,5 +5,5 @@ import (
 	"golang.org/x/tools/go/analysis/unitchecker"
 )
 
-func main() { unitchecker.Main(go_unused_reassignment.Analyzer) }
+func main() { unitchecker.Main(gounusedreassignment.Analyzer) }
 

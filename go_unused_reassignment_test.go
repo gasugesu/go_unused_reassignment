@@ -1,4 +1,4 @@
-package go_unused_reassignment_test
+package gounusedreassignment_test
 
 import (
 	"testing"
@@ -10,6 +10,6 @@ import (
 // TestAnalyzer is a test for Analyzer.
 func TestAnalyzer(t *testing.T) {
 	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, go_unused_reassignment.Analyzer, "a")
+	analysistest.Run(t, testdata, gounusedreassignment.Analyzer, "a")
 }
 
