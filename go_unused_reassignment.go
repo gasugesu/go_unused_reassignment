@@ -1,6 +1,7 @@
 package gounusedreassignment
 
 import (
+	"container/list"
 	"fmt"
 	"go/token"
 	"go/types"
@@ -55,16 +56,6 @@ func run(pass *analysis.Pass) (interface{}, error) {
 		}
 
 		mgr := newResubstitutionManager()
-
-		// blockグラフ構築
-		for _, block := range f.Blocks {
-			for _, pred := range block.Preds {
-				mgr.addBlockEdge(pred, block)
-			}
-			for _, succ := range block.Succs {
-				mgr.addBlockEdge(block, succ)
-			}
-		}
 
 		for _, block := range f.Blocks {
 			fmt.Printf("\tBlock %d\n", block.Index)
@@ -184,34 +175,19 @@ func run(pass *analysis.Pass) (interface{}, error) {
 
 func newResubstitutionManager() *ResubstitutionManager {
 	return &ResubstitutionManager{
-		blockFlowOut:          make(map[*ssa.BasicBlock]mapset.Set),
-		blockFlowIn:           make(map[*ssa.BasicBlock]mapset.Set),
 		unusedrResubstitution: []token.Pos{},
 	}
 }
 
 type ResubstitutionManager struct {
-	callMap               map[*ssa.BasicBlock]map[string][]string
-	blockFlowOut          map[*ssa.BasicBlock]mapset.Set
-	blockFlowIn           map[*ssa.BasicBlock]mapset.Set
+	callMap               map[string]
 	unusedrResubstitution []token.Pos
-}
-
-func (r *ResubstitutionManager) addBlockEdge(from *ssa.BasicBlock, to *ssa.BasicBlock) {
-	if _, ok := r.blockFlowOut[from]; !ok {
-		r.blockFlowOut[from] = mapset.NewSet()
-	}
-	if _, ok := r.blockFlowIn[to]; !ok {
-		r.blockFlowIn[to] = mapset.NewSet()
-	}
-	r.blockFlowOut[from].Add(1)
-	r.blockFlowIn[to].Add(1)
 }
 
 func (r *ResubstitutionManager) storeVarAt(block *ssa.BasicBlock, addrName *string, pos token.Pos, useAddrName *string) {
 	// TODO: 未実装
 	// ここでうまくグラフを構築したい
-	
+
 }
 
 func (r *ResubstitutionManager) use(block *ssa.BasicBlock, addrName *string) {
