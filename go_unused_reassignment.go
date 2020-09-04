@@ -55,9 +55,23 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			continue
 		}
 
+		bf := newBlockFlowController(f.Blocks[0])
 		mgr := newResubstitutionManager()
 
+		// blockグラフ構築
 		for _, block := range f.Blocks {
+			for _, pred := range block.Preds {
+				bf.addBlockEdge(pred, block)
+			}
+			for _, succ := range block.Succs {
+				bf.addBlockEdge(block, succ)
+			}
+		}
+
+		nextBlock := f.Blocks[0]
+		for {
+			block := nextBlock
+
 			fmt.Printf("\tBlock %d\n", block.Index)
 			for _, instr := range block.Instrs {
 				fmt.Printf("\t\t%[1]T\t%[1]v(%[1]p)\n", instr)
@@ -166,6 +180,11 @@ func run(pass *analysis.Pass) (interface{}, error) {
 					}
 				}
 			}
+
+			nextBlock = bf.getNextBlock()
+			if nextBlock == nil {
+				break
+			}
 		}
 		mgr.calcUnusedrResubstitution()
 		mgr.report()
@@ -173,6 +192,71 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	return nil, nil
 }
 
+func newBlockFlowController(firstBlock *ssa.BasicBlock) *blockFlowController {
+	return &blockFlowController{
+		nextBlock:    []*ssa.BasicBlock{firstBlock},
+		blockFlowIn:  make(map[*ssa.BasicBlock]mapset.Set),
+		blockFlowOut: make(map[*ssa.BasicBlock]mapset.Set),
+	}
+}
+
+type blockFlowController struct {
+	nextBlock    []*ssa.BasicBlock
+	doneBlock    mapset.Set
+	blockFlowOut map[*ssa.BasicBlock]mapset.Set
+	blockFlowIn  map[*ssa.BasicBlock]mapset.Set
+}
+
+// blockごとに見て、そのブロックまででその変数が使われているかどうかを見る
+func (r *blockFlowController) addBlockEdge(from *ssa.BasicBlock, to *ssa.BasicBlock) {
+	if _, ok := r.blockFlowOut[from]; !ok {
+		r.blockFlowOut[from] = mapset.NewSet()
+	}
+	if _, ok := r.blockFlowIn[to]; !ok {
+		r.blockFlowIn[to] = mapset.NewSet()
+	}
+	r.blockFlowOut[from].Add(to)
+	r.blockFlowIn[to].Add(from)
+}
+
+func (r *blockFlowController) getNextBlock() *ssa.BasicBlock {
+	for b := range r.blockFlowOut[r.nextBlock[0]].Iterator().C {
+		b, ok := b.(*ssa.BasicBlock)
+		if !ok {
+			panic(nil)
+		}
+		r.nextBlock = append(r.nextBlock, b)
+	}
+	r.doneBlock.Add(r.nextBlock[0])
+	r.nextBlock = r.nextBlock[1:]
+
+	var nextIndex int
+	for i, b := range r.nextBlock {
+		canStart := true
+		for inBlock := range r.blockFlowIn[b].Iterator().C {
+			inBlock, ok := inBlock.(*ssa.BasicBlock)
+			if !ok {
+				panic(nil)
+			}
+			if !r.doneBlock.Contains(inBlock) {
+				canStart = false
+				break
+			}
+		}
+		if canStart {
+			nextIndex = i
+			break
+		}
+	}
+	// 長さ0になったら終了
+	if len(r.nextBlock) == 0 {
+		return nil
+	}
+	temp := r.nextBlock[nextIndex]
+	r.nextBlock[nextIndex] = r.nextBlock[0]
+	r.nextBlock[0] = temp
+	return r.nextBlock[0]
+}
 func newResubstitutionManager() *ResubstitutionManager {
 	return &ResubstitutionManager{
 		unusedrResubstitution: []token.Pos{},
