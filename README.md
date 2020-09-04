@@ -1,7 +1,8 @@
 # go_unused_reassignment(未完成)
 
-再代入後に使用されていないものを指摘する静的解析ツール
+再代入後に使用されていないものと、それを取り除いた時に使用されていないものを指摘する静的解析ツール
 
+## 適用前
 
 ```golang
 var f = func(p int) int{
@@ -35,3 +36,24 @@ var f = func(p int) int{
 	return p
 }
 ```
+
+## 適用後
+
+```golang
+var f = func(p int) int{
+	a := 987 + temp(p)
+	b := 12345
+	a,b = b,a
+	a += 10
+	if p == 10 {
+	}else {
+		a = 39475
+	}
+
+	if p == 100 {
+	}else {
+		a = 39475
+	}
+	p = a + b
+	return p
+}
