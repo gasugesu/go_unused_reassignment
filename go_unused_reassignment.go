@@ -186,7 +186,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			}
 		}
 		mgr.calcUnusedrResubstitution()
-		mgr.report()
+		mgr.report(pass)
 	}
 	return nil, nil
 }
@@ -282,7 +282,7 @@ type varInfo struct {
 }
 
 func (v *varInfo) isUnused() bool {
-	return false
+	return !(v.isUsedFromSameBlock || !v.isReassignedBeforeUseInNextBlock)
 }
 
 func (v varInfo) copy() varInfo {
@@ -296,14 +296,18 @@ func (v varInfo) copy() varInfo {
 
 type unusedReport struct {
 	pos     token.Pos
-	block   *ssa.BasicBlock
 	message string
+}
+
+type unusedVarInfo struct {
+	pos   token.Pos
+	block *ssa.BasicBlock
 }
 
 func newResubstitutionManager() *ResubstitutionManager {
 	return &ResubstitutionManager{
 		callMap:               make(map[*ssa.BasicBlock]map[string]varInfo),
-		lastUnusedVar:         make(map[*ssa.BasicBlock]map[string][]token.Pos),
+		lastUnusedVar:         make(map[*ssa.BasicBlock]map[string][]unusedVarInfo),
 		unusedrResubstitution: []unusedReport{},
 	}
 }
@@ -311,7 +315,7 @@ func newResubstitutionManager() *ResubstitutionManager {
 type ResubstitutionManager struct {
 	callMap map[*ssa.BasicBlock]map[string]varInfo
 	// 各blockの直前までの使用状況.各ブロックの直前までのブロックで、unusedである変数の情報をもつ
-	lastUnusedVar         map[*ssa.BasicBlock]map[string][]token.Pos
+	lastUnusedVar         map[*ssa.BasicBlock]map[string][]unusedVarInfo
 	unusedrResubstitution []unusedReport
 }
 
@@ -321,18 +325,18 @@ func (r *ResubstitutionManager) storeVarAt(block *ssa.BasicBlock, addrName *stri
 	// もしそのブロック初めての呼び出しであれば直前のブロックまでの情報の全てを統合したmapを作成する
 	if !ok {
 		r.callMap[block] = make(map[string]varInfo)
-		r.lastUnusedVar[block] = make(map[string][]token.Pos)
+		r.lastUnusedVar[block] = make(map[string][]unusedVarInfo)
 		preds := bf.getBlocksPreds()
 		for _, predBlock := range preds {
 			for name := range r.lastUnusedVar[predBlock] {
 				_, ok := r.lastUnusedVar[block][name]
 				if !ok {
-					r.lastUnusedVar[block][name] = make([]token.Pos, 0)
+					r.lastUnusedVar[block][name] = make([]unusedVarInfo, 0)
 				}
 				if _, ok := r.callMap[predBlock][name]; ok {
 					// １度は直前のブロックで使用されたがその後の再代入後まだ未使用
 					if r.callMap[predBlock][name].isUsedFromSameBlock == false {
-						r.lastUnusedVar[block][name] = append(r.lastUnusedVar[block][name], r.callMap[predBlock][name].pos)
+						r.lastUnusedVar[block][name] = append(r.lastUnusedVar[block][name], unusedVarInfo{pos: r.callMap[predBlock][name].pos, block: predBlock})
 					}
 				} else {
 					// 直前のブロックで一度も使用されていないのでその直前ブロック開始時点での未使用情報を付加
@@ -406,10 +410,30 @@ func (r *ResubstitutionManager) storeVarAt(block *ssa.BasicBlock, addrName *stri
 }
 
 func (r *ResubstitutionManager) calcUnusedrResubstitution() {
-	// TODO: 最後にunusedのもので拾われていないものを全部持ってくる. (そんなものは本当にあるのか？)
+	// TODO: 最後にunusedのもので拾われていないものを全部持ってくる. 最後にassigneされたが一度も使用されてないものだとか
+	for b := range r.callMap {
+		for name := range r.callMap[b] {
+			r.unusedrResubstitution = append(r.unusedrResubstitution, unusedReport{pos: r.callMap[b][name].pos, message: "Resubstitutioned before used"})
+		}
+	}
+	temp := mapset.NewSet()
+	for _,i := range r.unusedrResubstitution {
+		temp.Add(i.pos)
+	}
+	ret := []unusedReport{}
+	for _,i := range temp.ToSlice() {
+		i,ok := i.(unusedReport)
+		if !ok {
+			panic("!!!!!!!!!!!!!!!")
+		}
+		ret = append(ret,i)
+	}
+	r.unusedrResubstitution = ret
 }
 
-func (r *ResubstitutionManager) report() {
+func (r *ResubstitutionManager) report(pass *analysis.Pass) {
 	// TODO: reportフィールドに入っているものをposでソートしてreportする
-
+	for _, i := range r.unusedrResubstitution {
+		pass.Reportf(i.pos, i.message)
+	}
 }
