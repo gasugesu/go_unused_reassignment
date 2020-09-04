@@ -2,14 +2,14 @@ package gounusedreassignment
 
 import (
 	"fmt"
-	"go/token"
 	"go/types"
+
+	"github.com/gasugesu/go_unused_reassignment/tools"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/ssa/ssautil"
 
-	mapset "github.com/deckarep/golang-set"
 )
 
 const doc = "go_unused_reassignment is ..."
@@ -54,19 +54,23 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			continue
 		}
 
-		mgr := newResubstitutionManager()
+		bf := tools.NewBlockFlowController(f.Blocks[0])
+		mgr := tools.NewResubstitutionManager()
 
 		// blockグラフ構築
 		for _, block := range f.Blocks {
 			for _, pred := range block.Preds {
-				mgr.addBlockEdge(pred, block)
+				bf.AddBlockEdge(pred, block)
 			}
 			for _, succ := range block.Succs {
-				mgr.addBlockEdge(block, succ)
+				bf.AddBlockEdge(block, succ)
 			}
 		}
 
-		for _, block := range f.Blocks {
+		nextBlock := f.Blocks[0]
+		for {
+			block := nextBlock
+
 			fmt.Printf("\tBlock %d\n", block.Index)
 			for _, instr := range block.Instrs {
 				fmt.Printf("\t\t%[1]T\t%[1]v(%[1]p)\n", instr)
@@ -89,7 +93,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 							fmt.Printf("\t\t\t%[1]T\t%[1]v(%[1]p)\n", value)
 						}
 					}
-					mgr.storeVarAt(block, storeToAddrName, instr.Pos(), useAddrName)
+					mgr.StoreVarAt(block, storeToAddrName, instr.Pos(), useAddrName, bf)
 				case *ssa.UnOp:
 					fmt.Println("\t\t", instr.Name(), "Op: ", instr.Op, "Val1: ", instr.X)
 					storeToAddrName := new(string)
@@ -102,7 +106,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 						// CommaOk and Op=ARROW の場合ここで前の値が握り潰される
 						*useAddrName = (*value).Name()
 					}
-					mgr.storeVarAt(block, storeToAddrName, instr.Pos(), useAddrName)
+					mgr.StoreVarAt(block, storeToAddrName, instr.Pos(), useAddrName, bf)
 				case *ssa.BinOp:
 					fmt.Println("\t\t", instr.Name(), "Op: ", instr.Op, "Val1: ", instr.X, "Val2: ", instr.Y)
 					storeToAddrName := new(string)
@@ -118,7 +122,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 						}
 						if len(*refPtr) > 0 {
 							*useAddrName = (*value).Name()
-							mgr.storeVarAt(block, storeToAddrName, instr.Pos(), useAddrName)
+							mgr.StoreVarAt(block, storeToAddrName, instr.Pos(), useAddrName, bf)
 						}
 					}
 				case *ssa.If:
@@ -133,7 +137,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 						}
 						if len(*refPtr) > 0 {
 							*useAddrName = (*value).Name()
-							mgr.storeVarAt(block, nil, instr.Pos(), useAddrName)
+							mgr.StoreVarAt(block, nil, instr.Pos(), useAddrName, bf)
 						}
 					}
 				case *ssa.Call:
@@ -152,7 +156,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 						}
 						if len(*refPtr) > 0 {
 							*useAddrName = (*value).Name()
-							mgr.storeVarAt(block, storeToAddrName, instr.Pos(), useAddrName)
+							mgr.StoreVarAt(block, storeToAddrName, instr.Pos(), useAddrName, bf)
 						}
 					}
 				case *ssa.Return:
@@ -166,7 +170,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 						}
 						if len(*refPtr) > 0 {
 							*useAddrName = (*value).Name()
-							mgr.storeVarAt(block, nil, instr.Pos(), useAddrName)
+							mgr.StoreVarAt(block, nil, instr.Pos(), useAddrName, bf)
 						}
 					}
 				default:
@@ -175,53 +179,14 @@ func run(pass *analysis.Pass) (interface{}, error) {
 					}
 				}
 			}
+
+			nextBlock = bf.GetNextBlock()
+			if nextBlock == nil {
+				break
+			}
 		}
-		mgr.calcUnusedrResubstitution()
-		mgr.report()
+		mgr.CalcUnusedrResubstitution()
+		mgr.Report(pass)
 	}
 	return nil, nil
-}
-
-func newResubstitutionManager() *ResubstitutionManager {
-	return &ResubstitutionManager{
-		blockFlowOut:          make(map[*ssa.BasicBlock]mapset.Set),
-		blockFlowIn:           make(map[*ssa.BasicBlock]mapset.Set),
-		unusedrResubstitution: []token.Pos{},
-	}
-}
-
-type ResubstitutionManager struct {
-	callMap               map[*ssa.BasicBlock]map[string][]string
-	blockFlowOut          map[*ssa.BasicBlock]mapset.Set
-	blockFlowIn           map[*ssa.BasicBlock]mapset.Set
-	unusedrResubstitution []token.Pos
-}
-
-func (r *ResubstitutionManager) addBlockEdge(from *ssa.BasicBlock, to *ssa.BasicBlock) {
-	if _, ok := r.blockFlowOut[from]; !ok {
-		r.blockFlowOut[from] = mapset.NewSet()
-	}
-	if _, ok := r.blockFlowIn[to]; !ok {
-		r.blockFlowIn[to] = mapset.NewSet()
-	}
-	r.blockFlowOut[from].Add(1)
-	r.blockFlowIn[to].Add(1)
-}
-
-func (r *ResubstitutionManager) storeVarAt(block *ssa.BasicBlock, addrName *string, pos token.Pos, useAddrName *string) {
-	// TODO: 未実装
-	// ここでうまくグラフを構築したい
-}
-
-func (r *ResubstitutionManager) use(block *ssa.BasicBlock, addrName *string) {
-	// TODO: storeでaddrNameにnilを許すとここ不要
-}
-
-func (r *ResubstitutionManager) calcUnusedrResubstitution() {
-	// TODO: 構築されたグラフを後ろから見て依存関係のないところは全てreportに挿入&削除
-}
-
-func (r *ResubstitutionManager) report() {
-	// TODO: reportフィールドに入っているものをposでソートしてreportする
-
 }
