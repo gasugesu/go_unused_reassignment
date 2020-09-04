@@ -5,26 +5,32 @@ func temp(a int) int {
 }
 
 var f = func(p int) int{
-	tt := temp
-	a := 987 + tt(p)
+	a := 987 + temp(p) 
 	for i:=0;i<10;i++ {
-		a += i // want "unused"
+		a += i // want "Resubstitutioned before used"
 	}
 	b := 12345
 	a,b = b,a
 	a += 10
 	if p == 10 {
-		p = 54321 // want "unused"
+		p = 54321 // want "Resubstitutioned before used"
 	}else {
 		a = 39475
 	}
-	p = 12340000 // want "unused"
+
+	if p == 10 {
+		p = 54321 // want "Resubstitutioned before used"
+	}else {
+		a = 39475 
+	}
+
+	p = 12340000 // want "Resubstitutioned before used"
 	p = a + b
-	a = 12345 // want "unused"
-	a += 20 // want "unused"
-	a += 20 // want "unused"
-	a = a + 5124 // want "unused"
-	a += 30 // want "unused"
-	a += 40 // want "unused"
+	a = 12345 // want "Resubstitutioned before used"
+	a += 20 // want "Resubstitutioned before used"
+	a += 20 // want "Resubstitutioned before used"
+	a = a + 5124 // want "Resubstitutioned before used"
+	a += 30 // want "Resubstitutioned before used"
+	a += 40 // want "Resubstitutioned before used"
 	return p
 }
